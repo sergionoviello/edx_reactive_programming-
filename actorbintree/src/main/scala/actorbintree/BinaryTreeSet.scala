@@ -4,7 +4,9 @@
 package actorbintree
 
 import akka.actor._
+
 import scala.collection.immutable.Queue
+import scala.util.Random
 
 object BinaryTreeSet {
 
@@ -50,7 +52,7 @@ object BinaryTreeSet {
 }
 
 
-class BinaryTreeSet extends Actor {
+class BinaryTreeSet extends Actor with Stash {
   import BinaryTreeSet._
   import BinaryTreeNode._
 
@@ -66,14 +68,30 @@ class BinaryTreeSet extends Actor {
 
   // optional
   /** Accepts `Operation` and `GC` messages. */
-  val normal: Receive = { case _ => ??? }
+  val normal: Receive = {
+    case msg =>
+      root ! msg
+    case GC =>
+      val newRoot = root
+      root ! CopyTo(newRoot)
+      context.become(garbageCollecting(newRoot))
+
+  }
+
+
 
   // optional
   /** Handles messages while garbage collection is performed.
     * `newRoot` is the root of the new binary tree where we want to copy
     * all non-removed elements into.
     */
-  def garbageCollecting(newRoot: ActorRef): Receive = ???
+  def garbageCollecting(newRoot: ActorRef): Receive = {
+    case _:Operation => stash()
+    case CopyFinished =>
+      root = newRoot
+      context.unbecome()
+      unstashAll()
+  }
 
 }
 
@@ -100,13 +118,94 @@ class BinaryTreeNode(val elem: Int, initiallyRemoved: Boolean) extends Actor {
 
   var subtrees = Map[Position, ActorRef]()
   var removed = initiallyRemoved
+  var countNodes = 0
 
   // optional
   def receive = normal
 
   // optional
   /** Handles `Operation` messages and `CopyTo` requests. */
-  val normal: Receive = { case _ => ??? }
+  val normal: Receive = {
+    case Insert(req, id, el) =>
+
+      if (el > elem) {
+        doInsert(Right, req, id, el)
+      }
+      else if (el < elem) {
+        doInsert(Left, req, id, el)
+      } else {
+        if (removed) removed = false
+        req ! OperationFinished(id)
+      }
+
+    case Contains(req, id, el) =>
+      if (el > elem) {
+        doContains(Right, req, id, el)
+      }
+      else if (el < elem) {
+        doContains(Left, req, id, el)
+      } else {
+        req ! ContainsResult(id, !removed)
+      }
+
+    case Remove(req, id, el) =>
+      if (el > elem) {
+        doRemove(Right, req, id, el)
+      }
+      else if (el < elem) {
+        doRemove(Left, req, id, el)
+      } else {
+        removed = true
+        req ! OperationFinished(id)
+      }
+
+    case CopyTo(newRoot) =>
+      if(!removed) newRoot ! Insert(self, Random.nextInt(), elem)
+      if(subtrees.isEmpty) {
+        context.parent ! CopyFinished
+        context.stop(self)
+      }
+      else {
+        subtrees.values.foreach(ref => ref ! CopyTo(ref))
+      }
+    case CopyFinished =>
+      countNodes += 1
+      if (countNodes == subtrees.size) {
+        context.parent ! CopyFinished
+        context.stop(self)
+      }
+    case _ => //ignore
+  }
+
+  def doInsert(pos: Position, req: ActorRef, id: Int,  el: Int) = {
+    subtrees.get(pos) match {
+      case Some(ref) => //non leaf
+        ref ! Insert(req, id, el)
+      case None => // leaf
+        val child = context.actorOf(BinaryTreeNode.props(el, initiallyRemoved = false))
+        subtrees += (pos -> child)
+
+        req ! OperationFinished(id)
+    }
+  }
+
+  def doContains(pos: Position, req: ActorRef, id: Int,  el: Int)  = {
+    subtrees.get(pos) match {
+      case Some(ref) => //non leaf
+        ref ! Contains(req, id, el)
+      case None =>
+        req ! ContainsResult(id, false)
+    }
+  }
+
+  def doRemove(pos: Position, req: ActorRef, id: Int,  el: Int)  = {
+    subtrees.get(pos) match {
+      case Some(ref) => //non leaf
+        ref ! Remove(req, id, el)
+      case None =>
+        req ! OperationFinished(id)
+    }
+  }
 
   // optional
   /** `expected` is the set of ActorRefs whose replies we are waiting for,

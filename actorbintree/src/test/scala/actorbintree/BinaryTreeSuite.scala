@@ -11,7 +11,7 @@ import org.junit.Assert._
 import scala.util.Random
 import scala.concurrent.duration._
 
-class BinaryTreeSuite extends TestKit(ActorSystem("BinaryTreeSuite")) with ImplicitSender {
+class sBinaryTreeSuite extends TestKit(ActorSystem("BinaryTreeSuite")) with ImplicitSender {
 
   import actorbintree.BinaryTreeSet._
 
@@ -39,6 +39,20 @@ class BinaryTreeSuite extends TestKit(ActorSystem("BinaryTreeSuite")) with Impli
 
     receiveN(probe, ops, expected)
     // the grader also verifies that enough actors are created
+  }
+
+  @Test def `proper inserts and lookups with remove (5pts)`(): Unit = {
+    val topNode = system.actorOf(Props[BinaryTreeSet])
+
+    topNode ! Insert(testActor, id = 1, 1)
+    topNode ! Remove(testActor, id = 2, 1)
+
+    topNode ! Contains(testActor, id = 3, 1)
+
+    expectMsg(OperationFinished(1))
+    expectMsg(OperationFinished(2))
+    expectMsg(ContainsResult(3, false))
+    ()
   }
 
   @Test def `proper inserts and lookups (5pts)`(): Unit = {
