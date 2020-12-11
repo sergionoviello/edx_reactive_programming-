@@ -44,22 +44,25 @@ class Replicator(val replica: ActorRef) extends Actor {
   def receive: Receive = {
     case Replicate(key, value, id) =>
       val seq = nextSeq()
-      acks += (id -> (sender(), Replicate(key, value, id)))
-      println(s"replicate ${replica}")
+
       replica ! Snapshot(key, value, seq)
+      acks += ((seq, (sender, Replicate(key, value, id))))
+
       context.system.scheduler.scheduleOnce(50 milliseconds) {
         self ! Retry(key, value, seq)
       }
 
-    case Retry(key, value, seq) =>
+    case Retry(key, value, seq) if acks get seq nonEmpty =>
       replica ! Snapshot(key, value, seq)
       context.system.scheduler.scheduleOnce(50 milliseconds) {
         self ! Retry(key, value, seq)
       }
 
     case SnapshotAck(key, seq) =>
-      println("SNAPS")
-      acks(seq)._1 ! Replicated(key, seq)
+      for ((primary, Replicate(key, _, id)) <- acks get seq) {
+        acks -= seq
+        primary ! Replicated(key, id)
+      }
     case _ =>
   }
 
