@@ -30,12 +30,12 @@ trait Step4_SecondaryPersistenceSpec { this: KVStoreSuite =>
     }
 
     assertEquals("secondary replica should already serve the received update while waiting for persistence: ", Some("v1"), client.get("k1"))
-//
-//    replicator.expectNoMessage(500.milliseconds)
-//
-//    persistence.reply(Persisted("k1", persistId))
-//    replicator.expectMsg(SnapshotAck("k1", 0L))
-//    assertEquals(Some("v1"), client.get("k1"))
+
+    replicator.expectNoMessage(500.milliseconds)
+
+    persistence.reply(Persisted("k1", persistId))
+    replicator.expectMsg(SnapshotAck("k1", 0L))
+    assertEquals(Some("v1"), client.get("k1"))
   }
 
   @Test def `Step4-case2: Secondary should retry persistence in every 100 milliseconds`(): Unit = {

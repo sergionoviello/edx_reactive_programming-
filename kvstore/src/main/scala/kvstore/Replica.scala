@@ -4,7 +4,7 @@ import akka.actor.{ OneForOneStrategy, PoisonPill, Props, SupervisorStrategy, Te
 import kvstore.Arbiter._
 import akka.pattern.{ ask, pipe }
 import scala.concurrent.duration._
-import akka.util.Timeout
+import scala.language.postfixOps
 
 object Replica {
   sealed trait Operation {
@@ -39,6 +39,8 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   // the current set of replicators
   var replicators = Set.empty[ActorRef]
 
+  val persister = context.actorOf(persistenceProps, "persister")
+  var persistenceAcks = Map.empty[Long, ActorRef]
   var expectedSeq = 0L
 
   override def preStart(): Unit = {
@@ -87,13 +89,35 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Snapshot(key, Some(v), seq) if (expectedSeq == seq) => {
       kv = kv + (key -> v)
       expectedSeq += 1
-      sender() ! SnapshotAck(key, seq)
+      persister ! Persist(key, Some(v), seq)
+
+      context.system.scheduler.scheduleOnce(100 milliseconds) {
+        self ! Retry(key, Some(v), seq)
+      }
+
+      persistenceAcks += seq -> sender
     }
     case Snapshot(key, None, seq) if (expectedSeq == seq) => {
       kv -= key
       expectedSeq += 1
-      sender() ! SnapshotAck(key, seq)
+      persister ! Persist(key, None, seq)
+
+      context.system.scheduler.scheduleOnce(100 milliseconds) {
+        self ! Retry(key, None, seq)
+      }
+      persistenceAcks += seq -> sender
     }
+
+    case Retry(key, v, id) =>
+      persister ! Persist(key, v, id)
+      context.system.scheduler.scheduleOnce(50 milliseconds) {
+        self ! Retry(key, v, id)
+      }
+    case Persisted(key, id) =>
+      val req = persistenceAcks(id)
+
+      req ! SnapshotAck(key, id)
+      persistenceAcks -= id
     case _ =>  println("replica not handled")
   }
 

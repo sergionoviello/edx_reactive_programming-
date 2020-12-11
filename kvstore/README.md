@@ -190,7 +190,8 @@ Since the replication protocol is meant to symbolize remote replication you must
 
 Persistence
 Each replica will have to submit incoming updates to the local Persistence actor and wait for its acknowledgement before confirming the update to the requester.
-In case of the primary, the requester is a client which sent an Insert or Remove request and the confirmation is an OperationAck, whereas in the case of a secondary
+In case of the primary, the requester is a client which sent an Insert or Remove request and the confirmation is an OperationAck,
+whereas in the case of a secondary
 the requester is a Replicator sending a Snapshot and expecting a SnapshotAck back.
 
 The used message types are:
