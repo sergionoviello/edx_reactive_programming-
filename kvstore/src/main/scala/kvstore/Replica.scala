@@ -42,16 +42,13 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   var expectedSeq = 0L
 
   override def preStart(): Unit = {
-    println("EEEEE")
     arbiter ! Join
   }
 
   def receive = {
     case JoinedPrimary   =>
-      println("prim")
       context.become(leader)
     case JoinedSecondary =>
-      println("sec")
       context.become(replica)
   }
 
@@ -78,28 +75,26 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
         replicators += repActor
       }
 
-    case _ =>
-      println("BBBBB")
+    case _ => println("leader not handled")
   }
 
   /* TODO Behavior for the replica role. */
   val replica: Receive = {
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
-    case Snapshot(key, valueOption, seq) =>
-      if (expectedSeq == seq) {
-        valueOption match {
-          case Some(v) =>
-            kv = kv + (key -> valueOption.get)
-          case None =>
-            kv -= key
-        }
-
-        expectedSeq += 1
-        sender() ! SnapshotAck(key, seq)
-      }
-    case _ =>
-      println("AAAAA")
+    case Snapshot(key, _, seq) if seq < expectedSeq =>
+      sender ! SnapshotAck(key, seq)
+    case Snapshot(key, Some(v), seq) if (expectedSeq == seq) => {
+      kv = kv + (key -> v)
+      expectedSeq += 1
+      sender() ! SnapshotAck(key, seq)
+    }
+    case Snapshot(key, None, seq) if (expectedSeq == seq) => {
+      kv -= key
+      expectedSeq += 1
+      sender() ! SnapshotAck(key, seq)
+    }
+    case _ =>  println("replica not handled")
   }
 
 }

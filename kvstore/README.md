@@ -189,7 +189,9 @@ skipping the state where a_key contains the value value1.
 Since the replication protocol is meant to symbolize remote replication you must consider the case that either a Snapshot message or its corresponding SnapshotAck message is lost on the way. Therefore the Replicator must make sure to periodically retransmit all unacknowledged changes. For grading purposes it is assumed that this happens roughly every 100 milliseconds. To allow for batching (see above) we will assume that a lost Snapshot message will lead to a resend at most 200 milliseconds after the Replicate request was received (again, the ActorSystem’s scheduler service is considered precise enough for this purpose).
 
 Persistence
-Each replica will have to submit incoming updates to the local Persistence actor and wait for its acknowledgement before confirming the update to the requester. In case of the primary, the requester is a client which sent an Insert or Remove request and the confirmation is an OperationAck, whereas in the case of a secondary the requester is a Replicator sending a Snapshot and expecting a SnapshotAck back.
+Each replica will have to submit incoming updates to the local Persistence actor and wait for its acknowledgement before confirming the update to the requester.
+In case of the primary, the requester is a client which sent an Insert or Remove request and the confirmation is an OperationAck, whereas in the case of a secondary
+the requester is a Replicator sending a Snapshot and expecting a SnapshotAck back.
 
 The used message types are:
 

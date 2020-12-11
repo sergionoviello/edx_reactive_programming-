@@ -95,6 +95,4 @@ trait Step2_SecondarySpec { this: KVStoreSuite =>
     replicator.expectMsg(SnapshotAck("k1", 0L))
     assertEquals(Some("v2"), client.get("k1"))
   }
-
-  
 }
