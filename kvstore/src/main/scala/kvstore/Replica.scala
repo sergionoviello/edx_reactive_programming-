@@ -83,10 +83,25 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
 
-    case Remove(key, id) =>
-      kv = kv.filter(item => item._1 != key)
-      sender() ! OperationAck(id)
-      replicators.foreach(_ ! Replicate(key, None, id))
+    case Remove(k, id) =>
+      kv = kv.filter(item => item._1 != k)
+
+      replicators.foreach(_ ! Replicate(k, None, id))
+
+      if(replicators.nonEmpty) {
+        replicatorAcks += ((id, (k, Some(sender), replicators.size)))
+      }
+
+      persister ! Persist(k, None, id)
+      context.system.scheduler.scheduleOnce(50 milliseconds) {
+        self ! Retry(k, None, id)
+      }
+
+      persistenceAcks += id -> sender
+      val sn = sender()
+      context.system.scheduler.scheduleOnce(1 second) {
+        self ! Check(sn, id)
+      }
 
     case Replicas(replicas) =>
       replicas.foreach { rep =>
@@ -169,7 +184,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       persistenceAcks += seq -> sender
     }
     case Snapshot(key, None, seq) if (expectedSeq == seq) => {
-      println("snapshot2")
       kv -= key
       expectedSeq += 1
       persister ! Persist(key, None, seq)
@@ -185,11 +199,11 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       context.system.scheduler.scheduleOnce(50 milliseconds) {
         self ! Retry(key, v, id)
       }
-    case Persisted(key, id) =>
+    case Persisted(key, id) if persistenceAcks get id nonEmpty =>
       val req = persistenceAcks(id)
-
-      req ! SnapshotAck(key, id)
       persistenceAcks -= id
+      req ! SnapshotAck(key, id)
+
     case _ =>  println("replica not handled")
   }
 
