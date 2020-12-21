@@ -1,11 +1,10 @@
-NOTE: This assignment is two weeks long, there will be no new assignment next week. We recommend not rushing this exercise and solving it in several steps as you see fit.
-
-To get started, download the reactive-kvstore.zip handout archive file and extract it somewhere on your machine.
-
 Simple Replicated Key-Value store
-A key-value store is a very simple form of a database. Its entries are key-value pairs, the key part acting as a unique identifier, and the value being arbitrary data. In recent years, distributed versions of key-value stores have become very popular. Your task in this assignment is to implement a distributed, replicated storage of key-value pairs. Each node (the replicas) in this distributed system will be represented by one actor. You will also have to define some helper actors.
-
-In the simplified version that we will examine, your system will include a primary node (the primary replica), which will be responsible for replicating all changes to a set of secondary nodes (the secondary replicas). The primary and the secondary replica nodes will form a distributed database, where potential replica nodes might join and leave at arbitrary times.
+A key-value store is a very simple form of a database. Its entries are key-value pairs, the key part acting as a unique
+identifier, and the value being arbitrary data. In recent years, distributed versions of key-value stores have become very popular.
+Your task in this assignment is to implement a distributed, replicated storage of key-value pairs.
+Each node (the replicas) in this distributed system will be represented by one actor. You will also have to define some helper actors.
+In the simplified version that we will examine, your system will include a primary node (the primary replica),
+which will be responsible for replicating all changes to a set of secondary nodes (the secondary replicas). The primary and the secondary replica nodes will form a distributed database, where potential replica nodes might join and leave at arbitrary times.
 
 The primary replica will be the only one accepting modification events (insertions and removals) and replicate its current state to the secondaries. Both the primary and the secondary replicas will accept lookup (read) events, although the secondary nodes will be allowed to give results that are "out-of-date" since it takes time for the replicas to keep up with the changes on the primary replica.
 
@@ -19,7 +18,6 @@ In case of rejecting an update the store is left in a possibly inconsistent stat
 Clients are expected to not reuse request IDs before the request has been fully processed and responded to.
 For a more detailed discussion of these restrictions and on how lifting them would affect the solution please refer to the last section below.
 
-This is a complex assignment. Please read the whole description before attempting to solve the exercise. In the last section you will find a step-by-step list of which subtasks you need to solve in order to have a complete solution. If you are unable to arrive at a full solution due to time constraints, don’t despair, for you will have learnt a lot along the way.
 
 Overview of the system components
 The key-value store and its environment consists of the following components:
@@ -96,9 +94,7 @@ The previous two sections prescribed possible transitions that the clients are a
 
 Whenever the primary replica receives an update operation (either Insert or Remove) it must reply with an OperationAck(id) or OperationFailed(id) message, to be sent at most 1 second after the update command was processed (the ActorSystem’s timer resolution is deemed to be sufficiently precise for this).
 
-A positive OperationAck reply must be sent as soon as
-
-the change in question has been handed down to the Persistence module (provided) and a corresponding acknowledgement has been received from it (the persistence module is "flaky"—it fails randomly from time to time—and it is your task to keep it alive while retrying unacknowledged persistence operations until they succeed, see the persistence section for details)
+A positive OperationAck reply must be sent as soon as the change in question has been handed down to the Persistence module (provided) and a corresponding acknowledgement has been received from it (the persistence module is "flaky"—it fails randomly from time to time—and it is your task to keep it alive while retrying unacknowledged persistence operations until they succeed, see the persistence section for details)
 
 replication of the change in question has been initiated and all of the secondary replicas have acknowledged the replication of the update.
 
@@ -143,6 +139,7 @@ The secondary replicas must provide the following features:
 
 The secondary nodes must accept the lookup operation (Get) from clients following the Key-Value protocol while respecting the guarantees described in “Guarantees for clients contacting the secondary replica”.
 The replica nodes must accept replication events, updating their current state (see “Replication Protocol”).
+
 The Replication Protocol
 Apart from providing the KV protocol for external clients, you must implement another protocol involving the primary and secondary replicas and some newly introduced helper nodes. The KV store will use this protocol to synchronize its state between nodes.
 
@@ -153,9 +150,13 @@ Your task for this protocol will be to provide an Actor representing a Replicato
 class Replicator(val replica: ActorRef) extends Actor
 The protocol includes two pairs of messages. The first one is used by the replica actor which requests replication of an update:
 
-Replicate(key, valueOption, id) is sent to the Replicator to initiate the replication of the given update to the key; in case of an Insert operation the valueOption will be Some(value) while in case of a Remove operation it will be None. The sender of the Replicate message shall be the Replica itself.
+Replicate(key, valueOption, id) is sent to the Replicator to initiate the replication of the given update to the key;
+in case of an Insert operation the valueOption will be Some(value) while in case of a Remove
+ operation it will be None. The sender of the Replicate message shall be the Replica itself.
 
-Replicated(key, id) is sent as a reply to the corresponding Replicate message once replication of that update has been successfully completed (see SnapshotAck). The sender of the Replicated message shall be the Replicator.
+Replicated(key, id) is sent as a reply to the corresponding Replicate message
+once replication of that update has been successfully completed (see SnapshotAck).
+The sender of the Replicated message shall be the Replicator.
 
 The second pair is used by the replicator when communicating with its partner replica:
 
@@ -189,16 +190,25 @@ skipping the state where a_key contains the value value1.
 Since the replication protocol is meant to symbolize remote replication you must consider the case that either a Snapshot message or its corresponding SnapshotAck message is lost on the way. Therefore the Replicator must make sure to periodically retransmit all unacknowledged changes. For grading purposes it is assumed that this happens roughly every 100 milliseconds. To allow for batching (see above) we will assume that a lost Snapshot message will lead to a resend at most 200 milliseconds after the Replicate request was received (again, the ActorSystem’s scheduler service is considered precise enough for this purpose).
 
 Persistence
-Each replica will have to submit incoming updates to the local Persistence actor and wait for its acknowledgement before confirming the update to the requester.
-In case of the primary, the requester is a client which sent an Insert or Remove request and the confirmation is an OperationAck,
+Each replica will have to submit incoming updates to the local Persistence actor and wait for
+its acknowledgement before confirming the update to the requester.
+In case of the primary, the requester is a client which sent an Insert or
+Remove request and the confirmation is an OperationAck,
 whereas in the case of a secondary
 the requester is a Replicator sending a Snapshot and expecting a SnapshotAck back.
 
 The used message types are:
 
-Persist(key, valueOption, id) is sent to the Persistence actor to request the given state to be persisted (with the same field description as for the Replicate message above).
-Persisted(key, id) is sent by the Persistence actor as reply in case the corresponding request was successful; no reply is sent otherwise. The reply is sent to the sender of the Persist message.  Note, however, that the sender of the Persisted message might not be the Persistence actor (in some tests, the Persisted message will be sent by a wrapper actor).
-The provided implementation of this persistence service is a mock in the true sense, since it is rather unreliable: every now and then it will fail with an exception and not acknowledge the current request. It is the job of the Replica actor to create and appropriately supervise the Persistence actor; for the purpose of this exercise any strategy will work, which means that you can experiment with different designs based on resuming, restarting or stopping and recreating the Persistence actor. To this end your Replica does not receive an ActorRef but a Props for this actor, implying that the Replica has to initially create it as well.
+Persist(key, valueOption, id) is sent to the Persistence actor to request the given state to be persisted
+ (with the same field description as for the Replicate message above).
+Persisted(key, id) is sent by the Persistence actor as reply in case the corresponding request was successful;
+no reply is sent otherwise. The reply is sent to the sender of the Persist message.
+Note, however, that the sender of the Persisted message might not be the Persistence actor
+(in some tests, the Persisted message will be sent by a wrapper actor).
+The provided implementation of this persistence service is a mock in the true sense, since it is rather unreliable:
+every now and then it will fail with an exception and not acknowledge the current request. It is the job of the Replica actor
+to create and appropriately supervise the Persistence actor; for the purpose of this exercise any strategy will work, which means that you can experiment with different designs based on resuming, restarting or stopping and recreating the Persistence actor.
+To this end your Replica does not receive an ActorRef but a Props for this actor, implying that the Replica has to initially create it as well.
 
 For grading purposes it is expected that Persist is retried before the 1 second response timeout in case persistence failed. The id used in retried Persist messages must match the one which was used in the first request for this particular update.
 

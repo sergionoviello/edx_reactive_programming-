@@ -84,8 +84,8 @@ trait Step5_PrimaryPersistenceSpec { this: KVStoreSuite =>
 
   @Test def `Step5-case5: Primary acknowledges only after persistence and global acknowledgement`(): Unit = {
     val arbiter = TestProbe()
-        val primary = system.actorOf(Replica.props(arbiter.ref, Persistence.props(flaky = false)), "step5-case5-primary")
-        val secondaryA, secondaryB = TestProbe()
+    val primary = system.actorOf(Replica.props(arbiter.ref, Persistence.props(flaky = false)), "step5-case5-primary")
+    val secondaryA, secondaryB = TestProbe()
     val client = session(primary)
 
     arbiter.expectMsg(Join)

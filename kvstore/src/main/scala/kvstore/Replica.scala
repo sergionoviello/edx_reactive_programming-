@@ -15,6 +15,8 @@ object Replica {
   case class Remove(key: String, id: Long) extends Operation
   case class Get(key: String, id: Long) extends Operation
 
+  case class Check(sender: ActorRef, id: Long)
+
   sealed trait OperationReply
   case class OperationAck(id: Long) extends OperationReply
   case class OperationFailed(id: Long) extends OperationReply
@@ -41,6 +43,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
   val persister = context.actorOf(persistenceProps, "persister")
   var persistenceAcks = Map.empty[Long, ActorRef]
+  var replicatorAcks = Map.empty[Long, (String, Option[ActorRef], Int)]
   var expectedSeq = 0L
 
   override def preStart(): Unit = {
@@ -58,8 +61,25 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   val leader: Receive = {
     case Insert(k, v, id) =>
       kv += (k -> v)
-      sender() ! OperationAck(id)
+
       replicators.foreach(_ ! Replicate(k, Some(v), id))
+
+      if(replicators.nonEmpty) {
+        replicatorAcks += ((id, (k, Some(sender), replicators.size)))
+      }
+
+      persister ! Persist(k, Some(v), id)
+      context.system.scheduler.scheduleOnce(50 milliseconds) {
+        self ! Retry(k, Some(v), id)
+      }
+
+      persistenceAcks += id -> sender
+      val sn = sender()
+      context.system.scheduler.scheduleOnce(1 second) {
+        self ! Check(sn, id)
+      }
+    case Check(sender, id) if ((persistenceAcks get id nonEmpty) || (replicatorAcks get id nonEmpty)) =>
+      sender ! OperationFailed(id)
     case Get(key, id) =>
       sender() ! GetResult(key, kv.get(key), id)
 
@@ -70,14 +90,64 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
     case Replicas(replicas) =>
       replicas.foreach { rep =>
-        val repActor = context.actorOf(Replicator.props(rep))
+        if (rep != self) {
+          val repActor = context.actorOf(Replicator.props(rep))
 
-        kv.foreach(item => repActor ! Replicate(item._1, Some(item._2), scala.util.Random.nextInt()))
+          kv.foreach { item =>
+            val nextId = scala.util.Random.nextInt()
+            repActor ! Replicate(item._1, Some(item._2), nextId)
 
-        replicators += repActor
+            val newAck:(Long, (String, Option[ActorRef], Int)) = replicatorAcks get nextId match {
+              case Some((key, req, missingAcks)) =>
+                 (nextId, (key,req, missingAcks+1))
+              case None if persistenceAcks get nextId nonEmpty =>
+                (nextId, (item._1, Some(persistenceAcks(nextId)), 1))
+              case None if persistenceAcks get nextId isEmpty =>
+                (nextId, (item._1, None, 1))
+            }
+
+            replicatorAcks += newAck
+          }
+
+          replicators += repActor
+        }
+      }
+    case Retry(key, v, id) =>
+      persister ! Persist(key, v, id)
+      context.system.scheduler.scheduleOnce(50 milliseconds) {
+        self ! Retry(key, v, id)
+      }
+    case Persisted(_, id) if (replicatorAcks get id isEmpty)  =>
+      //println(s"Persisted replicatorAcks isEmpty $persistenceAcks $replicatorAcks")
+
+      if (persistenceAcks get id nonEmpty) {
+        val req = persistenceAcks(id)
+        req ! OperationAck(id)
+        persistenceAcks -= id
+      }
+    case Persisted(_, id) if (replicatorAcks get id nonEmpty) =>
+      //println(s"Persisted replicatorAcks nonEmpty $persistenceAcks $replicatorAcks")
+      if (persistenceAcks get id nonEmpty) {
+        persistenceAcks -= id
       }
 
-    case _ => println("leader not handled")
+    case Replicated(_, id) if (persistenceAcks get id isEmpty) =>
+      replicatorAcks(id) match {
+        case (key, Some(req), 1) =>
+          req ! OperationAck(id)
+          replicatorAcks -= id
+
+        case (key, req, acksLeft) =>
+          replicatorAcks += ((id, (key, req, acksLeft - 1)))
+      }
+    case Replicated(k, id) if (persistenceAcks get id nonEmpty) =>
+      replicatorAcks(id) match {
+        case (key, req, 1) => replicatorAcks -= id
+        case (key, req, acksLeft) => replicatorAcks += ((id, (key, req, acksLeft - 1)))
+
+      }
+
+    case _ => //it receives a snapshot message from replicator
   }
 
   /* TODO Behavior for the replica role. */
@@ -87,6 +157,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Snapshot(key, _, seq) if seq < expectedSeq =>
       sender ! SnapshotAck(key, seq)
     case Snapshot(key, Some(v), seq) if (expectedSeq == seq) => {
+      println("snapshot1")
       kv = kv + (key -> v)
       expectedSeq += 1
       persister ! Persist(key, Some(v), seq)
@@ -98,6 +169,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       persistenceAcks += seq -> sender
     }
     case Snapshot(key, None, seq) if (expectedSeq == seq) => {
+      println("snapshot2")
       kv -= key
       expectedSeq += 1
       persister ! Persist(key, None, seq)
