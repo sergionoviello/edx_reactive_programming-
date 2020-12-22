@@ -34,7 +34,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   /*
    * The contents of this actor is just a suggestion, you can implement it in any way you like.
    */
-  
+
   var kv = Map.empty[String, String]
   // a map from secondary replicas to replicators
   var secondaries = Map.empty[ActorRef, ActorRef]
@@ -104,49 +104,70 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       }
 
     case Replicas(replicas) =>
-      replicas.foreach { rep =>
-        if (rep != self) {
-          val repActor = context.actorOf(Replicator.props(rep))
+      val newReps = (replicas &~ secondaries.keySet) - self
+      val repsToDelete =  secondaries.keySet &~ replicas
 
-          kv.foreach { item =>
-            val nextId = scala.util.Random.nextInt()
-            repActor ! Replicate(item._1, Some(item._2), nextId)
+      println(s"newReps: ${newReps}")
+      println(s"repsToDelete: ${repsToDelete}")
 
-            val newAck:(Long, (String, Option[ActorRef], Int)) = replicatorAcks get nextId match {
-              case Some((key, req, missingAcks)) =>
-                 (nextId, (key,req, missingAcks+1))
-              case None if persistenceAcks get nextId nonEmpty =>
-                (nextId, (item._1, Some(persistenceAcks(nextId)), 1))
-              case None if persistenceAcks get nextId isEmpty =>
-                (nextId, (item._1, None, 1))
-            }
+      val replicatorsToDelete = for {
+        replica <- repsToDelete
+        replicator <- secondaries.get(replica)
+      } yield replicator
+      replicatorsToDelete foreach context.stop
 
-            replicatorAcks += newAck
+
+      for {
+        (id, (key, _, _)) <- replicatorAcks
+        _ <- replicatorsToDelete
+      } self ! Replicated(key, id)
+
+      newReps.foreach { rep =>
+
+        val repActor = context.actorOf(Replicator.props(rep))
+        println(s"kv: $kv")
+        kv.foreach { item =>
+          println(s"item $item")
+          val nextId = scala.util.Random.nextInt()
+          repActor ! Replicate(item._1, Some(item._2), nextId)
+
+          val newAck:(Long, (String, Option[ActorRef], Int)) = replicatorAcks get nextId match {
+            case Some((key, req, missingAcks)) =>
+              (nextId, (key,req, missingAcks+1))
+            case None if persistenceAcks get nextId nonEmpty =>
+              (nextId, (item._1, Some(persistenceAcks(nextId)), 1))
+            case None if persistenceAcks get nextId isEmpty =>
+              (nextId, (item._1, None, 1))
           }
 
-          replicators += repActor
+          replicatorAcks += newAck
         }
+
+        replicators += repActor
+        secondaries += (rep -> repActor)
       }
+
+      secondaries --= repsToDelete
+      replicators --= replicatorsToDelete
     case Retry(key, v, id) =>
       persister ! Persist(key, v, id)
       context.system.scheduler.scheduleOnce(50 milliseconds) {
         self ! Retry(key, v, id)
       }
     case Persisted(_, id) if (replicatorAcks get id isEmpty)  =>
-      //println(s"Persisted replicatorAcks isEmpty $persistenceAcks $replicatorAcks")
-
+      //println(s"persisted1: ${persistenceAcks}")
       if (persistenceAcks get id nonEmpty) {
         val req = persistenceAcks(id)
         req ! OperationAck(id)
         persistenceAcks -= id
       }
     case Persisted(_, id) if (replicatorAcks get id nonEmpty) =>
-      //println(s"Persisted replicatorAcks nonEmpty $persistenceAcks $replicatorAcks")
       if (persistenceAcks get id nonEmpty) {
         persistenceAcks -= id
       }
 
     case Replicated(_, id) if (persistenceAcks get id isEmpty) =>
+
       replicatorAcks(id) match {
         case (key, Some(req), 1) =>
           req ! OperationAck(id)
@@ -154,6 +175,11 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
 
         case (key, req, acksLeft) =>
           replicatorAcks += ((id, (key, req, acksLeft - 1)))
+
+        case (key, None, 1) =>
+          replicatorAcks -= id
+        case (key, None, acksLeft) =>
+          replicatorAcks += ((id, (key, None, acksLeft - 1)))
       }
     case Replicated(k, id) if (persistenceAcks get id nonEmpty) =>
       replicatorAcks(id) match {
@@ -172,7 +198,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
     case Snapshot(key, _, seq) if seq < expectedSeq =>
       sender ! SnapshotAck(key, seq)
     case Snapshot(key, Some(v), seq) if (expectedSeq == seq) => {
-      println("snapshot1")
       kv = kv + (key -> v)
       expectedSeq += 1
       persister ! Persist(key, Some(v), seq)
@@ -208,4 +233,3 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
   }
 
 }
-

@@ -39,8 +39,7 @@ class Replicator(val replica: ActorRef) extends Actor {
     _seqCounter += 1
     ret
   }
-  
-  /* TODO Behavior for the Replicator. */
+
   def receive: Receive = {
     case Replicate(key, value, id) =>
       val seq = nextSeq()
