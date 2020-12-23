@@ -107,15 +107,11 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       val newReps = (replicas &~ secondaries.keySet) - self
       val repsToDelete =  secondaries.keySet &~ replicas
 
-      println(s"newReps: ${newReps}")
-      println(s"repsToDelete: ${repsToDelete}")
-
       val replicatorsToDelete = for {
         replica <- repsToDelete
         replicator <- secondaries.get(replica)
       } yield replicator
       replicatorsToDelete foreach context.stop
-
 
       for {
         (id, (key, _, _)) <- replicatorAcks
@@ -125,9 +121,7 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
       newReps.foreach { rep =>
 
         val repActor = context.actorOf(Replicator.props(rep))
-        println(s"kv: $kv")
         kv.foreach { item =>
-          println(s"item $item")
           val nextId = scala.util.Random.nextInt()
           repActor ! Replicate(item._1, Some(item._2), nextId)
 
@@ -155,7 +149,6 @@ class Replica(val arbiter: ActorRef, persistenceProps: Props) extends Actor {
         self ! Retry(key, v, id)
       }
     case Persisted(_, id) if (replicatorAcks get id isEmpty)  =>
-      //println(s"persisted1: ${persistenceAcks}")
       if (persistenceAcks get id nonEmpty) {
         val req = persistenceAcks(id)
         req ! OperationAck(id)
