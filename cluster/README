@@ -1,0 +1,11 @@
+# Classic Cluster
+
+start main cluster
+`sbt "runMain LinkCheckerApp 2552"`
+
+this will start a single node cluster on 2552
+
+start worker cluster
+`sbt "runMain Worker 0"`
+
+
