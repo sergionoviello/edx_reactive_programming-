@@ -1,19 +1,11 @@
-import akka.actor.{Actor, ActorSystem, Props}
+
+import akka.actor.{Actor, ActorSystem, Props, ReceiveTimeout}
 import akka.cluster.{Cluster, ClusterEvent}
 import com.typesafe.config.ConfigFactory
 
-
+import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 
 object LinkCheckerApp extends App {
-
-//  val system = ActorSystem("MainCluster", ConfigFactory.load("node1.conf"))
-//  //val system2 = ActorSystem("WorkerCluster", ConfigFactory.load("node2.conf"))
-//
-//  system.actorOf(ClusterMain.props, "clusterMain")
-//
-//  //master ! ClusterMain.Start
-
-
   val port = if (args.isEmpty) "0" else args(0)
   val config = ConfigFactory
     .parseString(s"akka.remote.classic.netty.tcp.port=$port")
@@ -34,17 +26,43 @@ object ClusterMain {
 }
 
 class ClusterMain extends Actor {
-
+  import ClusterReceptionist._
   val cluster = Cluster(context.system)
   cluster.subscribe(self, classOf[ClusterEvent.MemberUp])
   cluster.subscribe(self, classOf[ClusterEvent.MemberRemoved])
 
   cluster.join(cluster.selfAddress)
 
+  val receptionist = context.actorOf(Props[ClusterReceptionist], "receptionistr")
+  context.watch(receptionist)
+
+
+  def getLater(d: FiniteDuration, url: String)= {
+    import context.dispatcher
+    context.system.scheduler.scheduleOnce(d, receptionist, Get(url))
+  }
+
+  getLater(Duration.Zero, "http://www.google.com")
+
+
   def receive = {
     case ClusterEvent.MemberUp(member) =>
-      println(s"@@@@@@@@@@ ${member.address} ${cluster.selfAddress}")
+      if (member.address != cluster.selfAddress) {
+        getLater(1.seconds, "http://www.google.com")
+        getLater(2.seconds, "http://www.google.com/0")
+        getLater(2.seconds, "http://www.google.com/1")
+        getLater(3.seconds, "http://www.google.com/2")
+        getLater(4.seconds, "http://www.google.com/3")
 
+        context.setReceiveTimeout(3.seconds)
+      }
+
+    case Result(url, set)=>
+      println(set.toVector.sorted.mkString(s"Results for $url :\n", "\n", "\n"))
+    case Failed(url, msg) =>
+      println(s"Failed: $url $msg")
+    case ReceiveTimeout =>
+      cluster.leave(cluster.selfAddress)
     case ClusterEvent.MemberRemoved(m, _) =>
       context.stop(self)
   }

@@ -7,7 +7,10 @@ object Worker extends App {
   val port = if (args.isEmpty) "0" else args(0)
 
   val config = ConfigFactory
-    .parseString(s"akka.remote.classic.netty.tcp.port=$port")
+    .parseString(s"""
+      akka.remote.classic.netty.tcp.port=$port
+      akka.cluster.auto-down=on
+    """)
     .withFallback(ConfigFactory.parseString("akka.cluster.roles = [worker]"))
     .withFallback(ConfigFactory.load())
 
@@ -33,6 +36,10 @@ class ClusterWorker extends Actor {
 
   def receive = {
     case ClusterEvent.MemberRemoved(m, _) =>
-      println("removed")
+      if (m.address == main) context.stop(self)
+  }
+
+  override def postStop(): Unit = {
+    AsyncWebClient.shutdown()
   }
 }

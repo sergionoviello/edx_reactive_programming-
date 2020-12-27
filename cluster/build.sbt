@@ -15,6 +15,9 @@ scalacOptions ++= Seq(
 )
 
 libraryDependencies ++= Seq(
+  "ch.qos.logback" % "logback-classic" % "1.1.3" % Runtime,
+  "org.asynchttpclient" % "async-http-client" % "2.12.1",
+  "org.jsoup" % "jsoup" % "1.8.1",
   "io.netty" % "netty" % "3.10.6.Final",
   "com.typesafe.akka"        %% "akka-remote" % akkaVersion,
   "com.typesafe.akka"        %% "akka-actor"         % akkaVersion,
