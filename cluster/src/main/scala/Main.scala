@@ -33,7 +33,7 @@ class ClusterMain extends Actor {
 
   cluster.join(cluster.selfAddress)
 
-  val receptionist = context.actorOf(Props[ClusterReceptionist], "receptionistr")
+  val receptionist = context.actorOf(Props[ClusterReceptionist], "receptionist")
   context.watch(receptionist)
 
 

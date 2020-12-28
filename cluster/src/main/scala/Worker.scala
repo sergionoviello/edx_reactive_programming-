@@ -1,5 +1,5 @@
 import LinkCheckerApp.args
-import akka.actor.{Actor, ActorSystem, Props}
+import akka.actor.{Actor, ActorIdentity, ActorSystem, Identify, Props, RootActorPath, Terminated}
 import akka.cluster.{Cluster, ClusterEvent}
 import com.typesafe.config.ConfigFactory
 
@@ -30,13 +30,22 @@ object ClusterWorker {
 class ClusterWorker extends Actor {
 
   val cluster = Cluster(context.system)
-  cluster.subscribe(self, classOf[ClusterEvent.MemberRemoved])
+  //cluster.subscribe(self, classOf[ClusterEvent.MemberRemoved])
+  cluster.subscribe(self, classOf[ClusterEvent.MemberUp])
   val main = cluster.selfAddress.copy(port = Some(2552))
   cluster.join(main)
 
   def receive = {
-    case ClusterEvent.MemberRemoved(m, _) =>
-      if (m.address == main) context.stop(self)
+//    case ClusterEvent.MemberRemoved(m, _) =>
+//      if (m.address == main) context.stop(self)
+    case ClusterEvent.MemberUp(m) =>
+      val act = context.actorSelection(RootActorPath(main) / "user" / "backend" / "receptionist")
+      if (m.address == main) act ! Identify("42")
+
+    case ActorIdentity("42", None) => context.stop(self)
+    case ActorIdentity("42", Some(ref)) => context.watch(ref)
+    case Terminated(_) => context.stop(self)
+
   }
 
   override def postStop(): Unit = {
